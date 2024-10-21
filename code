@@ -1,0 +1,211 @@
+!pip install rarfile
+
+import os
+import cv2
+import numpy as np
+import tensorflow as tf
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from tensorflow.keras.layers import Input, Conv2D, MaxPooling2D, Flatten, Dense, concatenate, Dropout
+from tensorflow.keras.models import Model
+from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.utils import to_categorical
+from google.colab import files
+import matplotlib.pyplot as plt
+from sklearn.model_selection import train_test_split, KFold
+from sklearn.preprocessing import LabelEncoder
+from tensorflow.keras.callbacks import EarlyStopping
+import rarfile
+
+# Function to handle file uploads
+def upload_files():
+    uploaded = files.upload()
+    if len(uploaded) != 2:
+        raise ValueError("Please upload both 'ECG.rar' and 'ECGN.rar' files.")
+    return uploaded
+
+# Prompt for file uploads
+print("Please upload 'ECG.rar' and 'ECGN.rar' files.")
+uploaded = upload_files()
+
+# Extract RAR files
+uploaded_files = list(uploaded.keys())
+ecg_rar_path = uploaded_files[0]
+ecgn_rar_path = uploaded_files[1]
+
+with rarfile.RarFile(ecg_rar_path, 'r') as ecg_rar:
+    ecg_rar.extractall('ECG')
+
+with rarfile.RarFile(ecgn_rar_path, 'r') as ecgn_rar:
+    ecgn_rar.extractall('ECGN')
+
+# Preprocessing function
+def preprocess_data(directory, target_size):
+    images = []
+    labels = []
+    for subdir in os.listdir(directory):
+        label = subdir
+        subdir_path = os.path.join(directory, subdir)
+        if os.path.isdir(subdir_path):
+            for file in os.listdir(subdir_path):
+                img_path = os.path.join(subdir_path, file)
+                try:
+                    img = cv2.imread(img_path)
+                    if img is not None:
+                        img = cv2.resize(img, target_size)
+                        img = img / 255.0
+                        images.append(img)
+                        labels.append(label)
+                    else:
+                        print(f"Skipping file {img_path} as it cannot be read.")
+                except Exception as e:
+                    print(f"Error processing {img_path}: {e}")
+    return np.array(images), np.array(labels)
+
+# Adjust directory paths based on extraction
+ecg_dir = 'ECG/ECG'
+ecgn_dir = 'ECGN/ECGN'
+
+# Ensure the directories exist and have content
+if not os.path.exists(ecg_dir) or not os.path.exists(ecgn_dir):
+    raise FileNotFoundError("The extracted directories do not exist. Check the extraction process.")
+
+ecg_images, ecg_labels = preprocess_data(ecg_dir, (128, 128))
+ecgn_images, ecgn_labels = preprocess_data(ecgn_dir, (128, 128))
+
+# Encode labels
+label_encoder_ecg = LabelEncoder()
+label_encoder_ecgn = LabelEncoder()
+
+ecg_labels_encoded = label_encoder_ecg.fit_transform(ecg_labels)
+ecgn_labels_encoded = label_encoder_ecgn.fit_transform(ecgn_labels)
+
+ecg_labels_categorical = to_categorical(ecg_labels_encoded)
+ecgn_labels_categorical = to_categorical(ecgn_labels_encoded)
+
+# Ensure both datasets have the same number of samples
+min_samples = min(len(ecg_images), len(ecgn_images))
+
+ecg_images = ecg_images[:min_samples]
+ecg_labels_categorical = ecg_labels_categorical[:min_samples]
+ecgn_images = ecgn_images[:min_samples]
+ecgn_labels_categorical = ecgn_labels_categorical[:min_samples]
+
+# Data Augmentation
+datagen = ImageDataGenerator(
+    rotation_range=20,
+    width_shift_range=0.2,
+    height_shift_range=0.2,
+    horizontal_flip=True
+)
+
+# Split data into training, validation, and test sets
+ecg_train_images, ecg_temp_images, ecg_train_labels, ecg_temp_labels = train_test_split(ecg_images, ecg_labels_categorical, test_size=0.2, random_state=42)
+ecg_val_images, ecg_test_images, ecg_val_labels, ecg_test_labels = train_test_split(ecg_temp_images, ecg_temp_labels, test_size=0.5, random_state=42)
+
+ecgn_train_images, ecgn_temp_images, ecgn_train_labels, ecgn_temp_labels = train_test_split(ecgn_images, ecgn_labels_categorical, test_size=0.2, random_state=42)
+ecgn_val_images, ecgn_test_images, ecgn_val_labels, ecgn_test_labels = train_test_split(ecgn_temp_images, ecgn_temp_labels, test_size=0.5, random_state=42)
+
+train_ecg = datagen.flow(ecg_train_images, ecg_train_labels, batch_size=16, shuffle=True)
+train_ecgn = datagen.flow(ecgn_train_images, ecgn_train_labels, batch_size=16, shuffle=True)
+val_ecg = datagen.flow(ecg_val_images, ecg_val_labels, batch_size=16, shuffle=False)
+val_ecgn = datagen.flow(ecgn_val_images, ecgn_val_labels, batch_size=16, shuffle=False)
+
+# Build the Multimodal Model
+def build_model():
+    from tensorflow.keras.regularizers import l2
+
+    input_ecg = Input(shape=(128, 128, 3))
+    conv1_ecg = Conv2D(32, (3, 3), activation='relu', kernel_regularizer=l2(0.001))(input_ecg)
+    pool_ecg = MaxPooling2D(pool_size=(2, 2))(conv1_ecg)
+    flat_ecg = Flatten()(pool_ecg)
+    drop_ecg = Dropout(0.5)(flat_ecg)
+
+    input_ecgn = Input(shape=(128, 128, 3))
+    conv1_ecgn = Conv2D(32, (3, 3), activation='relu', kernel_regularizer=l2(0.001))(input_ecgn)
+    pool_ecgn = MaxPooling2D(pool_size=(2, 2))(conv1_ecgn)
+    flat_ecgn = Flatten()(pool_ecgn)
+    drop_ecgn = Dropout(0.5)(flat_ecgn)
+
+    merged = concatenate([drop_ecg, drop_ecgn])
+    dense1 = Dense(64, activation='relu')(merged)
+    drop_merged = Dropout(0.5)(dense1)
+    output = Dense(ecg_labels_categorical.shape[1], activation='softmax')(drop_merged)
+
+    model = Model(inputs=[input_ecg, input_ecgn], outputs=output)
+    return model
+
+# Compile the model
+model = build_model()
+model.compile(optimizer=Adam(), loss='categorical_crossentropy', metrics=['accuracy'])
+
+# Early Stopping
+early_stopping = EarlyStopping(monitor='val_loss', patience=3, restore_best_weights=True)
+
+# Cross-Validation
+kf = KFold(n_splits=5, shuffle=True, random_state=42)
+history_list = []
+fold_train_accuracies = []
+fold_val_accuracies = []
+
+for train_index, val_index in kf.split(ecg_images):
+    ecg_train_images, ecg_val_images = ecg_images[train_index], ecg_images[val_index]
+    ecg_train_labels, ecg_val_labels = ecg_labels_categorical[train_index], ecg_labels_categorical[val_index]
+    ecgn_train_images, ecgn_val_images = ecgn_images[train_index], ecgn_images[val_index]
+    ecgn_train_labels, ecgn_val_labels = ecgn_labels_categorical[train_index], ecgn_labels_categorical[val_index]
+
+    model = build_model()
+    model.compile(optimizer=Adam(), loss='categorical_crossentropy', metrics=['accuracy'])
+    history = model.fit(
+        [ecg_train_images, ecgn_train_images], ecg_train_labels,
+        epochs=15, validation_data=([ecg_val_images, ecgn_val_images], ecg_val_labels),
+        batch_size=16, callbacks=[early_stopping]
+    )
+    history_list.append(history)
+
+    # Evaluate the model on the validation set
+    val_loss, val_accuracy = model.evaluate([ecg_val_images, ecgn_val_images], ecg_val_labels, verbose=0)
+    fold_val_accuracies.append(val_accuracy)
+    fold_train_accuracies.append(max(history.history['accuracy']))
+
+# Evaluate the model on the test set
+test_loss, test_accuracy = model.evaluate([ecg_test_images, ecgn_test_images], ecg_test_labels)
+print(f"Test Loss: {test_loss}, Test Accuracy: {test_accuracy}")
+
+# Calculate average training and validation accuracy
+average_train_accuracy = np.mean(fold_train_accuracies)
+average_val_accuracy = np.mean(fold_val_accuracies)
+print(f"Average Training Accuracy: {average_train_accuracy:.4f}")
+print(f"Average Validation Accuracy: {average_val_accuracy:.4f}")
+
+# Plot training & validation accuracy values
+plt.figure(figsize=(12, 6))
+
+# Plot individual fold accuracies
+for i, history in enumerate(history_list):
+    plt.subplot(1, 3, 1)
+    plt.plot(history.history['accuracy'], label=f'Train Fold {i+1}')
+    plt.plot(history.history['val_accuracy'], label=f'Val Fold {i+1}')
+    plt.title('Fold-wise Accuracy')
+    plt.ylabel('Accuracy')
+    plt.xlabel('Epoch')
+    plt.legend(loc='upper left')
+
+# Plot average training accuracy
+plt.subplot(1, 3, 2)
+plt.plot(fold_train_accuracies, marker='o', linestyle='-', label='Train Accuracy')
+plt.title('Average Training Accuracy per Fold')
+plt.ylabel('Accuracy')
+plt.xlabel('Fold')
+plt.ylim(0, 1)
+
+# Plot average validation accuracy
+plt.subplot(1, 3, 3)
+plt.plot(fold_val_accuracies, marker='o', linestyle='-', color='orange', label='Validation Accuracy')
+plt.title('Average Validation Accuracy per Fold')
+plt.ylabel('Accuracy')
+plt.xlabel('Fold')
+plt.ylim(0, 1)
+
+plt.tight_layout()
+plt.show()
+
