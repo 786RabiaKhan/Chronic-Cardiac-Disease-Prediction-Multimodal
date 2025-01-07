@@ -12,5 +12,5 @@ How to Run
 3.	The output includes fold-wise training/validation accuracy.
 
 ## Dataset
-The datasets (ECG) can be downloaded from [Google Drive](https://drive.google.com/file/d/1O9XmNuA3larR6leXRWuhAWku_txy0W13/view?usp=sharing)
-The datasets (ECGN) can be downloaded from [Google Drive](https://drive.google.com/file/d/1askWgdTP9Ed_Kd-fYBX_QvOxy6Hvlt5C/view?usp=sharing))
+The dataset (ECG) can be downloaded from [Google Drive](https://drive.google.com/file/d/1O9XmNuA3larR6leXRWuhAWku_txy0W13/view?usp=sharing)
+The dataset (ECGN) can be downloaded from [Google Drive](https://drive.google.com/file/d/1askWgdTP9Ed_Kd-fYBX_QvOxy6Hvlt5C/view?usp=sharing))
