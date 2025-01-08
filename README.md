@@ -1,4 +1,4 @@
-## Chronic-Cardiac-Disease-Prediction-Multimodal
+## Internet of Medical Things Enabled Multimodal Framework: Deep Machine Learning for Chronic Cardiac Disease Prediction in Healthcare 5.0
 This project implements a multimodal deep learning model to predict chronic cardiac disease using a multimodal approach utilizing two ECG datasets using convolutional neural networks (CNNs). 
 One Dataset is from Kaggle, It consists ECG images of AHB (Atrioventricular Heart Block), COVID-19, HMI (Hypertrophic Cardiomyopathy), MI (Myocardial Infarction) and NORMAL (ECG). It consist of ECG images each of which is 640x640 jpg. Second dataset is taken from Mendley which in an online data repository. It consists of ECG images of Abnormal Heart Beat, Myocardial Infraction, History of Myocardial Infraction (HMI), and Normal. Each of which ECG image is 2213x1572 jpg.
 To run the code, the following libraries are required: TensorFlow, Keras, NumPy, OpenCV, Matplotlib, sklearn, and rarfile. These can be installed using a package manager such as pip.
